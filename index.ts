@@ -1,6 +1,8 @@
 import express from "express"
 import multer from "multer"
 import router from "./src/route"
+import type { Prisma } from "./src/generated/prisma"
+import { PrismaClient } from "./src/generated/prisma"
 
 const app = express()
 const port = process.env.PORT || 5004

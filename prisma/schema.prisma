@@ -10,16 +10,20 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "mysql"
   url      = env("DATABASE_URL")
 }
 
 model MaintenanceData {
   id String @id @default(cuid())
 
-  unitId String?
+  unitInstanceId String?
 
-  details MaintenanceDetail[]
+  currentSmr  Int
+  serviceDate DateTime
+  notes       String
+  details     MaintenanceDetail[]
+  evidences   MaintenanceEvidence[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -30,15 +34,26 @@ model MaintenanceData {
 model MaintenanceDetail {
   id String @id @default(cuid())
 
-  hours Int
-  notes String
-  evidence String
-
+  hours         Int
   maintenanceId String
-  maintenance MaintenanceData @relation(fields: [maintenanceId], references: [id])
+  maintenance   MaintenanceData @relation(fields: [maintenanceId], references: [id])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  
+
   @@map("maintenance_detail")
+}
+
+model MaintenanceEvidence {
+  id String @id @default(cuid())
+
+  filePath String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  MaintenanceData   MaintenanceData? @relation(fields: [maintenanceDataId], references: [id])
+  maintenanceDataId String?
+
+  @@map("maintenance_evidence")
 }
