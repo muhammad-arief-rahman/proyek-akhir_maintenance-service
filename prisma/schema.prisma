@@ -17,6 +17,7 @@ datasource db {
 model MaintenanceData {
   id String @id @default(cuid())
 
+  // Unit id reference of separate service 
   unitInstanceId String?
 
   currentSmr  Int
@@ -47,7 +48,7 @@ model MaintenanceDetail {
 model MaintenanceEvidence {
   id String @id @default(cuid())
 
-  filePath String
+  mediaId String
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -56,4 +57,23 @@ model MaintenanceEvidence {
   maintenanceDataId String?
 
   @@map("maintenance_evidence")
+}
+
+model SparePart {
+  id String @id @default(cuid())
+
+  // Unit id reference of separate service 
+  unitId String?
+
+  name       String
+  category   String
+  partNumber String
+  startPrice Int
+  endPrice   Int
+  mediaId    String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("spare_parts")
 }

@@ -1,96 +1,109 @@
 import { internalServerError, response } from "@ariefrahman39/shared-utils"
+import axios from "axios"
 import type { RequestHandler } from "express"
 import { z } from "zod"
-import { saveFile } from "../../../../../media/src/lib/utils"
-
-const storeSchema = z.object({
-  unitInstanceId: z
-    .string({
-      required_error: "Unit instance ID is required",
-      invalid_type_error: "Unit instance ID must be a string",
-    })
-    .min(1, {
-      message: "Unit instance ID must be at least 1 character long",
-    }),
-  currentSmr: z.coerce
-    .number({
-      required_error: "Current SMR is required",
-      invalid_type_error: "Current SMR must be a number",
-    })
-    .min(0, {
-      message: "Current SMR must be a positive number",
-    }),
-  notes: z
-    .string({
-      required_error: "Notes are required",
-    })
-    .min(1, {
-      message: "Notes must be at least 1 character long",
-    })
-    .optional(),
-  serviceDate: z.coerce
-    .date({
-      required_error: "Service date is required",
-    })
-    .refine((date) => date <= new Date(), {
-      message: "Service date cannot be in the future",
-    }),
-  details: z.array(
-    z.coerce
-      .number({
-        required_error: "Hour periods are required",
-        invalid_type_error: "Hour periods must be a number",
-      })
-      .min(0, {
-        message: "Hour periods must be a positive number",
-      })
-      .refine((hours) => hours % 500 === 0, {
-        message: "Hour periods must be a multiple of 500",
-      })
-  ),
-  // Array of images
-  evidences: z
-    .array(
-      z
-        .any({
-          required_error: "Evidences are required",
-        })
-        .refine((file) => file.size <= 5 * 1024 * 1024, {
-          message: "Each evidence must be less than 5MB",
-        })
-        .refine((file) => file.mimetype.startsWith("image/"), {
-          message: "Each evidence must be an image",
-        })
-    )
-    .min(1, {
-      message: "At least one evidence is required",
-    }),
-})
+import { storeSchema } from "../../../schema/maintenance/store"
+import prisma from "../../../lib/db"
 
 const store: RequestHandler = async (req, res) => {
   try {
-    const bodyData = {
-      ...(req.body ?? {}),
-      evidences: (req.files as Express.Multer.File[])
-        .map((file) => {
-          if (file.fieldname === "evidences[]") return file
+    await prisma.$transaction(async (tx) => {
+      const bodyData = {
+        ...(req.body ?? {}),
+        evidences: (req.files as Express.Multer.File[])
+          .map((file) => {
+            if (file.fieldname === "evidences[]") return file
 
-          return null
+            return null
+          })
+          .filter(Boolean),
+        details: req.body["details.hours"],
+      }
+
+      const parsedData = storeSchema.parse(bodyData)
+
+      // Check if the unit instance exists
+      try {
+        const response = await axios.get(
+          `${process.env.UNIT_SERVICE_URL}/data/instance/${parsedData.unitInstanceId}`
+        )
+      } catch (error) {
+        response(res, 404, "Unit instance not found")
+        return
+      }
+
+      // Create the maintenance record
+      const maintenance = await tx.maintenanceData.create({
+        data: {
+          currentSmr: parsedData.currentSmr,
+          notes: parsedData.notes ?? "No notes provided",
+          serviceDate: parsedData.serviceDate,
+          unitInstanceId: parsedData.unitInstanceId,
+        },
+      })
+
+      // Create the maintenance details
+      const details = await tx.maintenanceDetail.createMany({
+        data: parsedData.details.map((hours) => ({
+          hours,
+          maintenanceId: maintenance.id,
+        })),
+      })
+
+      // Create the maintenance evidences
+      let mediaIds: string[] = []
+
+      for (const file of parsedData.evidences as Express.Multer.File[]) {
+        if (!file) continue
+
+        const formData = new FormData()
+
+        const fileBlob = new Blob([file.buffer], {
+          type: file.mimetype,
         })
-        .filter(Boolean),
-      details: req.body["details.hours"],
-    }
 
-    const parsedData = storeSchema.parse(bodyData)
+        formData.set("file", fileBlob, file.originalname)
 
-    for (const file of parsedData.evidences as Express.Multer.File[]) {
-      const path = await saveFile(file, "maintenance-evidences")
+        const response = await axios.post(
+          `${process.env.MEDIA_SERVICE_URL}/data`,
+          formData,
+          {
+            headers: {
+              "Content-Type": "multipart/form-data",
+            },
+          }
+        )
 
-      console.log(`File saved at: ${path}`)
-    }
+        const mediaId = response.data?.data?.[0]
 
-    response(res, 200, "Store endpoint is working", parsedData)
+        if (mediaId) {
+          mediaIds.push(mediaId)
+        }
+      }
+
+      // Create the maintenance evidences
+      const evidences = await tx.maintenanceEvidence.createMany({
+        data: mediaIds.map((mediaId) => ({
+          mediaId,
+          maintenanceDataId: maintenance.id,
+        })),
+      })
+
+      response(res, 200, "Store endpoint is working", {
+        maintenance,
+        details,
+        evidences,
+      })
+      return
+    })
+
+    internalServerError(
+      res,
+      "Something went wrong while processing your request"
+    )
   } catch (error) {
+    console.error("Error in store endpoint:", error)
+
     if (error instanceof z.ZodError) {
       response(res, 422, "Validation error", error.errors, {
         validationType: "ZodError",

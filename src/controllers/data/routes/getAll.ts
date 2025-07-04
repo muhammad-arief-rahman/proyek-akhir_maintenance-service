@@ -1,4 +1,5 @@
 import {
+  type APIResponse,
   createResponsePagination,
   internalServerError,
   response,
@@ -6,6 +7,35 @@ import {
 import type { RequestHandler, Response } from "express"
 import prisma from "../../../lib/db"
 import type { Prisma } from "../../../generated/prisma"
+import axios from "axios"
+import type { CompleteOperationalData } from "../../../types/unit/complete-data"
+
+async function getUnitData() {
+  try {
+    const response = await axios.get<APIResponse<CompleteOperationalData[]>>(
+      `${process.env.UNIT_SERVICE_URL}/data?noPagination=true`
+    )
+    return response.data?.data
+  } catch (error) {
+    return []
+  }
+}
+
+function mapUnitWithMaintenanceData(
+  unitData: CompleteOperationalData[],
+  maintenanceData: Awaited<ReturnType<typeof prisma.maintenanceData.findMany>>
+) {
+  return unitData.map((unit) => {
+    const maintenances = maintenanceData.filter(
+      (m) => unit.instanceId === m.unitInstanceId
+    )
+
+    return {
+      ...unit,
+      maintenances: maintenances.length > 0 ? maintenances : null,
+    }
+  })
+}
 
 const getAll: RequestHandler = async (req, res) => {
   try {
@@ -15,86 +45,35 @@ const getAll: RequestHandler = async (req, res) => {
       search = "",
       sortBy = "createdAt",
       sortOrder = "desc",
-      organizationId = "",
       noPagination = "false",
     } = req.query as Record<string, string>
 
-    const whereQuery: Prisma.MaintenanceDataWhereInput = {
-      OR: [
-        {
-          details: {
-            some: {
-              currentSmr: {
-                // Give a range for search
-                gt: search ? parseFloat(search) - 1 : undefined,
-                lt: search ? parseFloat(search) + 1 : undefined,
-              },
-            },
-          },
-        },
-        {
-          details: {
-            some: {
-              notes: {
-                contains: search,
-              },
-            },
-          },
-        },
-        {
-          details: {
-            some: {
-              serviceDate: {
-                equals: search ? new Date(search) : undefined,
-              },
-            },
-          },
-        },
-      ],
-    }
+    const unitData = await getUnitData()
 
     if (noPagination === "true") {
       const maintenanceData = await prisma.maintenanceData.findMany({
         include: {
-          details: {
-            include: {
-              evidences: true,
-            },
-          },
+          evidences: true,
+          details: true,
         },
-        where: whereQuery,
       })
 
-      response(res, 200, "Got all data successfully", maintenanceData)
+      const mappedUnitData = mapUnitWithMaintenanceData(
+        unitData,
+        maintenanceData
+      )
+
+      response(
+        res,
+        200,
+        "Maintenance data fetched successfully",
+        mappedUnitData
+      )
       return
     }
 
-    const maintenanceData = await prisma.maintenanceData.findMany({
-      include: {
-        details: {
-          include: {
-            evidences: true,
-          },
-        },
-      },
-      where: whereQuery,
-      take: Number(limit),
-      skip: (Number(page) - 1) * Number(limit),
-      orderBy: {
-        [sortBy]: sortOrder,
-      },
-    })
-
-    const totalMaintenanceData = await prisma.maintenanceData.count({
-      where: whereQuery,
-    })
-
-    response(res, 200, "Got all data successfully", maintenanceData, {
-      pagination: createResponsePagination({
-        data: maintenanceData,
-        totalData: Math.ceil(totalMaintenanceData / Number(limit)),
-        page,
-      }),
+    response(res, 200, "Maintenance data fetched successfully", {
+      nre: "bre",
     })
   } catch (error) {
     internalServerError(res, error)

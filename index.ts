@@ -1,14 +1,14 @@
 import express from "express"
 import multer from "multer"
-import router from "./src/route"
-import type { Prisma } from "./src/generated/prisma"
-import { PrismaClient } from "./src/generated/prisma"
+import router from "./src/routes"
+import cookieparser from "cookie-parser"
 
 const app = express()
 const port = process.env.PORT || 5004
 
 app.use(express.json({ limit: "50mb" }))
 app.use(multer().any())
+app.use(cookieparser())
 
 app.use("/", router)
 

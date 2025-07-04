@@ -1,0 +1,7 @@
+const CONSTANTS = {
+  SINGLE_PERIOD_HOURS: 500,
+  MAX_PERIOD_AMOUNT: 12,
+  MAX_PERIODS_HOURS: 500 * 12, // 6,000 hours
+}
+
+export default CONSTANTS
